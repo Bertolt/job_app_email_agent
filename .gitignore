@@ -178,3 +178,4 @@ cython_debug/
 error_log.csv
 debug_df.csv
 debug_email_content.txt
+agents/data

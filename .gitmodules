@@ -1,0 +1,3 @@
+[submodule "agents/data"]
+	path = agents/data
+	url = git@github.com:Bertolt/job_app_email_agent_test_data.git
