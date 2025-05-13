@@ -24,6 +24,7 @@ import shutil
 
 import re
 import unicodedata
+from pydantic import BaseModel
 
 # from rapidfuzz import fuzz
 
@@ -48,25 +49,16 @@ LEGAL_SUFFIXES = re.compile(
 GENDER_MARKERS = re.compile(r"\((?:m/w/d|w/m/d|m/f/d|d/f/m)\)", re.I)
 
 
-class JobApplication:
+class JobApplication(BaseModel):
     """
     Class representing a job application with attributes for date, company name, and job role.
     """
 
-    def __init__(self, date, company_name, job_role):
-        self.date = date
-        self.company_name = company_name
-        self.job_role = job_role
-        # status are sent > active > rejected > accepted
-        self.status = None
-        self.rejection_reason = None
-
-    def __repr__(self):
-        return (
-            f"JobApplication(date={self.date}, "
-            f"company_name={self.company_name}, "
-            f"job_role={self.job_role})"
-        )
+    date: str
+    company_name: str
+    job_role: str
+    status: str
+    rejection_reason: str
 
 
 class JobApplicationEmailAgent(Agent):
@@ -148,28 +140,28 @@ class JobApplicationEmailAgent(Agent):
             exit(1)
 
     def extract_info(self, text):
-        system_prompt = """Extract the following from a his job application email:
-        - date (format: DD-MM-YYYY)
-        - company name (real company, not platform)
-        - job role (title of position applied for)
-        - Status (sent, active, rejected, accepted)
-        - rejection reason (if applicable)
+        system_prompt = """Extract the following from this job application email:
+            - date (format: DD-MM-YYYY)
+            - company name (real company, not platform)
+            - job role (title of position applied for)
+            - Status (sent, active, rejected, accepted)
+            - rejection reason (if applicable)
 
-        For job role:
-        - Exclude any gender in the such as (d/f/m) or (w/m/d).
-        - Exclude information regarding the location of the job.
+            For job role:
+            - Exclude any gender in the such as (d/f/m) or (w/m/d).
+            - Exclude information regarding the location of the job.
 
-        IMPORTANT: Your response must be valid JSON with no additional text.
-        Generate the output as JSON do not include any other text.
-        The JSON should be in the following format:
-        {
-            "date": "DD-MM-YYYY",
-            "company_name": "Company Name",
-            "job_role": "Job Role"
-            "status": "sent/active/rejected/accepted",
-            "rejection_reason": "Reason for rejection (if applicable)"
-        }
-        """
+            IMPORTANT: Your response must be ONLY valid JSON with no additional text.
+            Do not include code fences, markdown formatting, or any explanatory text.
+            The JSON should be in the following format:
+            {
+                "date": "DD-MM-YYYY",
+                "company_name": "Company Name",
+                "job_role": "Job Role",
+                "status": "sent/active/rejected/accepted",
+                "rejection_reason": "Reason for rejection (if applicable)"
+            }
+            """
         # User prompt with the actual email content
         user_prompt = f"Extract information from this job application email:\n\n{text}"
 
@@ -180,8 +172,13 @@ class JobApplicationEmailAgent(Agent):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            format=JobApplication.model_json_schema(),  # JSON guard-rail
+            options={"temperature": 0.0},
         )
-        return response["message"]["content"]
+
+        suggestion = JobApplication.model_validate_json(response["message"]["content"])
+        # Check if the response is valid JSON
+        return suggestion
 
     def process_messages(self):
         """Process messages from a CSV file with multiple emails, each potentially
@@ -210,47 +207,45 @@ class JobApplicationEmailAgent(Agent):
                 email_content = row.iloc[-1] if len(row) > 0 else None
 
                 if isinstance(email_content, str) and email_content.strip():
+                    # Extract information from the email content
+                    suggestion = self.extract_info(email_content)
+                    self.log.info("Processed row %d: %s", idx, suggestion)
+
                     try:
-                        # Extract information from the email content
-                        suggestion = self.extract_info(email_content)
-                        self.log.info("Processed row %d: %s", idx, suggestion)
-
-                        try:
-                            # Parse the suggestion as JSON
-                            suggestion_dict = json.loads(suggestion)
-                            # Check for duplicates
-                            company_name = self.normalise_company(
-                                suggestion_dict.get("company_name", None)
-                            )
-                            job_role = self.normalise_role(
-                                suggestion_dict.get("job_role", None)
-                            )
-                            # Add it to the dataframe
-
-                            self.reviewed_df.loc[len(self.reviewed_df)] = [
-                                pd.to_datetime(
-                                    suggestion_dict.get("date", None), format="%d-%m-%Y"
-                                ),
-                                company_name,
-                                job_role,
-                                suggestion_dict.get("status", None),
-                                suggestion_dict.get("rejection_reason", None),
-                            ]
-                        except json.JSONDecodeError as e:
-                            self.log.error(
-                                "Failed to parse JSON from suggestion for row %d: %s",
-                                idx,
-                                e,
-                            )
-                            # Log the error
-                            self._log_error(e, email_content, suggestion, idx)
-
-                    except Exception as e:
-                        self.log.error("Failed to process row %d: %s", idx, e)
-                        self._log_error(e, email_content, None, idx)
+                        company_name = self.normalise_company(suggestion.company_name)
+                        job_role = self.normalise_role(suggestion.job_role)
+                        # Add it to the dataframe
+                        date_str = self.parse_date(suggestion.date)
+                        self.reviewed_df.loc[len(self.reviewed_df)] = [
+                            date_str,
+                            company_name,
+                            job_role,
+                            suggestion.status,
+                            suggestion.rejection_reason,
+                        ]
+                    except json.JSONDecodeError as e:
+                        self.log.error(
+                            "Failed to parse JSON from suggestion for row %d: %s",
+                            idx,
+                            e,
+                        )
+                        # Log the error
+                        self._log_error(e, email_content, suggestion, idx)
 
         except Exception as e:
             self.log.error("Error reading file: %s", e)
+
+    def parse_date(self, date_str: str) -> str:
+        if date_str:
+            date_str = date_str.replace("/", "-")
+            try:
+                parsed_date = pd.to_datetime(date_str, format="%Y-%m-%d")
+            except ValueError:
+                # Fallback to more flexible parsing
+                parsed_date = pd.to_datetime(date_str, dayfirst=True)
+            return parsed_date.normalize().strftime("%Y-%m-%d")
+        else:
+            return ""
 
     def normalise_company(self, company_name: str) -> str:
         company_name = (
