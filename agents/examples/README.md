@@ -73,18 +73,14 @@ python agent.py --model_name mistral
 
 ### Managing Duplicates
 
-This allows duplicate job applications if they're more than 14 days apart.
 
-```bash
-python agent.py --allow_duplicates yes --duplicates_window 14
-```
 
 ### Complete Example with All Options
 
 This example:
 
 ```bash
-python agent.py --input_file data/messages_test_sample.csv --output_file custom_output.csv --model_name mistral --allow_duplicates yes --duplicates_window 30
+python agent.py --input_file data/messages_test_sample.csv --output_file custom_output.csv --model_name mistral
 ```
 
 Uses messages_test_sample.csv as input

@@ -11,10 +11,10 @@ Parameters:
     output_file (str): Path to save the processed job application data.
     model_name (str): Name of the Ollama model to use for information extraction.
     allow_duplicates (str): Whether to allow duplicate job applications ('yes' or 'no').
-    duplicates_window (int, optional): If allowing duplicates, the number of days
 """
 
 import pandas as pd
+import numpy as np
 import ollama
 import sys
 import os
@@ -26,8 +26,8 @@ import re
 import unicodedata
 from pydantic import BaseModel
 
-# from rapidfuzz import fuzz
-
+from rapidfuzz import fuzz
+from rapidfuzz.process import cdist
 
 from agents.agent import Agent
 
@@ -75,7 +75,6 @@ class JobApplicationEmailAgent(Agent):
         output_file (str): Path to save the processed job application data.
         model_name (str): Name of the Ollama model to use for information extraction.
         allow_duplicates (str): Whether to allow duplicate job applications ('yes' or 'no').
-        duplicates_window (int, optional): If allowing duplicates, the number of days
     """
 
     name = "Job Application Email Agent"
@@ -87,7 +86,6 @@ class JobApplicationEmailAgent(Agent):
         output_file="job_applications_reviewed.csv",
         model_name="llama3.2",
         allow_duplicates="no",
-        duplicates_window=None,
     ):
         super().__init__()
 
@@ -95,7 +93,6 @@ class JobApplicationEmailAgent(Agent):
         self.output_file = output_file
         self.model_name = model_name
         self.allow_duplicates = allow_duplicates
-        self.duplicates_window = duplicates_window
 
         self.log.info("Job Application Email Agent initialized")
         # If file existing progress move file to backup timestamp + namefile
@@ -292,45 +289,61 @@ class JobApplicationEmailAgent(Agent):
         error_df.to_csv("error_log.csv", mode="a", header=False, index=False)
 
     def eliminate_duplicates(self):
-        """Eliminate duplicates from the DataFrame using a hash map."""
-        if self.allow_duplicates == "no":
-            # Drop duplicates based on company_name and job_role
-            self.reviewed_df.drop_duplicates(
-                subset=["company_name", "job_role"], inplace=True, keep="first"
-            )
-        elif self.allow_duplicates == "yes":
-            if self.duplicates_window is not None:
-                # Ensure the date column is in datetime format
-                self.reviewed_df["date"] = pd.to_datetime(self.reviewed_df["date"])
-                self.reviewed_df.sort_values(by="date", inplace=True)
+        """Second step on data analysis.
+        when the dataframe is already created, we can eliminate duplicates
+        """
+        if self.reviewed_df.empty:
+            self.log.info("No data to check for duplicates")
+            return
 
-                # Use a hash map to track the most recent entry for each (company_name, job_role)
-                company_job_date_tracker = {}
-                rows_to_drop = []
+        original_count = len(self.reviewed_df)
+        self.log.info(f"Checking for duplicates in {original_count} entries")
 
-                for idx, row in self.reviewed_df.iterrows():
-                    key = (row["company_name"], row["job_role"])
-                    if key in company_job_date_tracker:
-                        # Check if the date difference is within the duplicates_window
-                        last_date = company_job_date_tracker[key]
-                        if (row["date"] - last_date).days <= self.duplicates_window:
-                            rows_to_drop.append(idx)
-                        else:
-                            company_job_date_tracker[key] = row[
-                                "date"
-                            ]  # Update the most recent date
-                    else:
-                        company_job_date_tracker[key] = row[
-                            "date"
-                        ]  # Add new entry to the hash map
+        # Create normalized keys for fuzzy matching
+        df = self.reviewed_df.copy()
 
-                # Drop the rows marked as duplicates
-                self.reviewed_df.drop(index=rows_to_drop, inplace=True)
-            else:
-                # If no custom time frame is provided, drop duplicates based on all rows
-                self.reviewed_df.drop_duplicates(
-                    subset=["company_name", "job_role"], inplace=True, keep="first"
-                )
+        # First remove exact duplicates
+        df.drop_duplicates(subset=["company_name", "job_role", "status"], inplace=True)
+
+        keys = (
+            df[["company_name", "job_role"]]
+            .astype(str)
+            .agg(" ".join, axis=1)
+            .to_numpy()
+        )
+
+        # Create a distance matrix for fuzzy matching
+        sim_matrix = (
+            cdist(
+                keys,
+                keys,
+                scorer=fuzz.token_set_ratio,
+                workers=-1,  # melt the CPU: use all cores
+                score_cutoff=95,
+            )  # returns 0 for “not similar”
+            > 0  # convert scores to True/False
+        )
+
+        # Exact match on status  (broadcast to a matrix)
+        status_eq = df["status"].to_numpy()
+        status_matrix = status_eq[:, None] == status_eq[None, :]
+
+        # A duplicate exists when *both* conditions are true
+        dupe_matrix = sim_matrix & status_matrix
+        # Mark rows that match any other row (ignore the diagonal)
+        np.fill_diagonal(dupe_matrix, False)
+        mask_dupes = dupe_matrix.any(axis=1)
+
+        # Keep only the unique rows
+        df = df.loc[~mask_dupes].reset_index(drop=True)
+
+        # write to CSV using test_output_no_dupes.csv
+        df.to_csv(
+            "test_output_no_dupes.csv",
+            index=True,
+            mode="w",
+            header=True,
+        )
 
     def write_to_csv(self):
         """Write the DataFrame to a CSV file."""
@@ -338,9 +351,7 @@ class JobApplicationEmailAgent(Agent):
             if self.allow_duplicates == "yes":
                 self.eliminate_duplicates()
             # Save the DataFrame to a CSV file
-            self.reviewed_df.to_csv(
-                self.output_file, index=False, mode="w", header=True
-            )
+            self.reviewed_df.to_csv(self.output_file, index=True, mode="w", header=True)
             self.log.info("Data saved to %s", self.output_file)
         except Exception as e:
             self.log.error("Failed to save data to %s: %s", self.output_file, e)
@@ -348,7 +359,9 @@ class JobApplicationEmailAgent(Agent):
 
 # Example usage with command-line arguments
 if __name__ == "__main__":
-    arg_parser = argparse.ArgumentParser(description="Process job application emails.")
+    arg_parser = argparse.ArgumentParser(
+        description="Process job application emails."
+    )  # 4.  A duplicate exists when *both* conditions are true
     arg_parser.add_argument(
         "--input_file",
         type=str,
@@ -375,12 +388,6 @@ if __name__ == "__main__":
         choices=["yes", "no"],
         help="Time frame for eliminating duplicates (default: all)",
     )
-    arg_parser.add_argument(
-        "--duplicates_window",
-        type=int,
-        default=None,
-        help="Number of days for custom time frame (required if allow_duplicates is 'active')",
-    )
 
     args = arg_parser.parse_args()
 
@@ -389,4 +396,5 @@ if __name__ == "__main__":
     )
 
     email_agent.process_messages()
+    email_agent.eliminate_duplicates()
     email_agent.write_to_csv()

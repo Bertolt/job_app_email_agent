@@ -64,18 +64,6 @@
             "program": "${workspaceFolder}/agents/examples/test_integration.py",
             "console": "integratedTerminal",
             "justMyCode": false
-        },
-        {
-            "name": "Run Unit Tests",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "pytest",
-            "args": [
-                "agents/tests",
-                "-v"
-            ],
-            "console": "integratedTerminal",
-            "justMyCode": false
         }
     ]
 }
