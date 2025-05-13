@@ -5,10 +5,12 @@ This script demonstrates how to use the agent with real CSV data containing CRLF
 It processes a sample input file and compares the output with expected results.
 """
 
+from agents.job_email_agent import JobApplicationEmailAgent
+
 import sys
 from pathlib import Path
+
 import pandas as pd
-from agents.job_email_agent import JobApplicationEmailAgent
 
 # Add the project root directory to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -17,8 +19,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 def run_integration_test():
     """Run an integration test using sample files."""
     # Set up paths
-    data_dir = Path(__file__).parent.parent / "data"
-    input_file = data_dir / "test_sample_messages_with_crlf.csv"
+    data_dir = Path(__file__).parent.parent / "data/email_data"
+    input_file = data_dir / "test_sample_duplicated_messages_with_crlf.csv"
     expected_output_file = data_dir / "test_sample_job_application_reviewed.csv"
     actual_output_file = data_dir / "test_output.csv"
 
@@ -89,7 +91,13 @@ def run_integration_test():
             print(actual_df)
 
             # Find rows that are in expected but not in actual
-            missing_rows = pd.merge(expected_df, actual_df, how="left", indicator=True)
+            missing_rows = pd.merge(
+                expected_df,
+                actual_df,
+                how="left",
+                on=["date", "company_name", "job_role"],
+                indicator=True,
+            )
             missing_rows = missing_rows[missing_rows["_merge"] == "left_only"].drop(
                 "_merge", axis=1
             )

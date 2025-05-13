@@ -53,7 +53,7 @@ Custom Input File
 This uses a different CSV file as input while maintaining other defaults.
 
 ```bash
-python agent.py --input_file data/messages_test_sample.csv
+python agent.py --input_file data/email_data/messages_test_sample.csv
 ```
 
 Custom Output File

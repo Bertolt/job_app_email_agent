@@ -16,12 +16,57 @@ Parameters:
 
 import pandas as pd
 import ollama
+import sys
 import os
 import json
 import argparse
+import shutil
+
+import re
+import unicodedata
+
+# from rapidfuzz import fuzz
 
 
 from agents.agent import Agent
+
+PUNCTUATION = re.compile(r"[^\w\s-]+", re.UNICODE)
+MULTI_WHITESPACE = re.compile(r"\s+")
+CROP_TAIL_AFTER_DASH = re.compile(r"\s+-\s+.*$")
+
+# any mixture of “m.b.H.”, “mbh”, “MBH” …, plus the usual suspects
+LEGAL_SUFFIXES = re.compile(
+    r"""\b(
+           gmbh        | m\s*\.?\s*b\s*\.?\s*h\s*\.? | mbh |
+           ag | se | kg | ug |
+           llc | inc | corp\.? | company | co\.? |
+           ltd | plc | oy | sas | sa | sarl | pte\.?
+       )\b""",
+    re.I | re.X,
+)
+
+GENDER_MARKERS = re.compile(r"\((?:m/w/d|w/m/d|m/f/d|d/f/m)\)", re.I)
+
+
+class JobApplication:
+    """
+    Class representing a job application with attributes for date, company name, and job role.
+    """
+
+    def __init__(self, date, company_name, job_role):
+        self.date = date
+        self.company_name = company_name
+        self.job_role = job_role
+        # status are sent > active > rejected > accepted
+        self.status = None
+        self.rejection_reason = None
+
+    def __repr__(self):
+        return (
+            f"JobApplication(date={self.date}, "
+            f"company_name={self.company_name}, "
+            f"job_role={self.job_role})"
+        )
 
 
 class JobApplicationEmailAgent(Agent):
@@ -61,22 +106,24 @@ class JobApplicationEmailAgent(Agent):
         self.duplicates_window = duplicates_window
 
         self.log.info("Job Application Email Agent initialized")
-        # Load existing progress if the output file exists
+        # If file existing progress move file to backup timestamp + namefile
         if os.path.exists(self.output_file):
             try:
-                self.reviewed_df = pd.read_csv(self.output_file)
-                self.reviewed_ids = set(self.reviewed_df.index)
-            except pd.errors.EmptyDataError:
-                # File exists but is empty or has no valid data
-                self.reviewed_df = pd.DataFrame(
-                    columns=["date", "company_name", "job_role"]
-                )
-                self.reviewed_ids = set()
-        else:
-            self.reviewed_df = pd.DataFrame(
-                columns=["date", "company_name", "job_role"]
-            )
-            self.reviewed_ids = set()
+                # First create a backup of the existing file
+                timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+                file_name, file_ext = os.path.splitext(self.output_file)
+                backup_file = f"{file_name}_{timestamp}{file_ext}"
+                # Copy the file to backup
+                shutil.copy2(self.output_file, backup_file)
+                self.log.info(f"Created backup of existing output file: {backup_file}")
+            except Exception as e:
+                self.log.error(f"Failed to create backup of existing output file: {e}")
+                sys.exit(1)
+
+        self.reviewed_df = pd.DataFrame(
+            columns=["date", "company_name", "job_role", "status", "rejection_reason"]
+        )
+        self.reviewed_ids = set()
 
         # Test connection to the Ollama model
         self.validate_ollama_connection()
@@ -105,8 +152,13 @@ class JobApplicationEmailAgent(Agent):
         - date (format: DD-MM-YYYY)
         - company name (real company, not platform)
         - job role (title of position applied for)
+        - Status (sent, active, rejected, accepted)
+        - rejection reason (if applicable)
 
-        Exclude any gender in the job role such as (d/f/m).
+        For job role:
+        - Exclude any gender in the such as (d/f/m) or (w/m/d).
+        - Exclude information regarding the location of the job.
+
         IMPORTANT: Your response must be valid JSON with no additional text.
         Generate the output as JSON do not include any other text.
         The JSON should be in the following format:
@@ -114,6 +166,8 @@ class JobApplicationEmailAgent(Agent):
             "date": "DD-MM-YYYY",
             "company_name": "Company Name",
             "job_role": "Job Role"
+            "status": "sent/active/rejected/accepted",
+            "rejection_reason": "Reason for rejection (if applicable)"
         }
         """
         # User prompt with the actual email content
@@ -164,13 +218,23 @@ class JobApplicationEmailAgent(Agent):
                         try:
                             # Parse the suggestion as JSON
                             suggestion_dict = json.loads(suggestion)
+                            # Check for duplicates
+                            company_name = self.normalise_company(
+                                suggestion_dict.get("company_name", None)
+                            )
+                            job_role = self.normalise_role(
+                                suggestion_dict.get("job_role", None)
+                            )
                             # Add it to the dataframe
+
                             self.reviewed_df.loc[len(self.reviewed_df)] = [
                                 pd.to_datetime(
                                     suggestion_dict.get("date", None), format="%d-%m-%Y"
                                 ),
-                                suggestion_dict.get("company_name", None),
-                                suggestion_dict.get("job_role", None),
+                                company_name,
+                                job_role,
+                                suggestion_dict.get("status", None),
+                                suggestion_dict.get("rejection_reason", None),
                             ]
                         except json.JSONDecodeError as e:
                             self.log.error(
@@ -187,6 +251,36 @@ class JobApplicationEmailAgent(Agent):
 
         except Exception as e:
             self.log.error("Error reading file: %s", e)
+
+    def normalise_company(self, company_name: str) -> str:
+        company_name = (
+            unicodedata.normalize("NFKD", company_name)
+            .encode("ascii", "ignore")
+            .decode()
+        )
+        company_name = company_name.lower()
+
+        # kill “- Munich, BY” or similar location hints
+        company_name = CROP_TAIL_AFTER_DASH.sub("", company_name)
+
+        # remove punctuation *before* looking for suffixes with dots
+        company_name = PUNCTUATION.sub(" ", company_name)
+        company_name = LEGAL_SUFFIXES.sub("", company_name)
+
+        company_name = MULTI_WHITESPACE.sub(" ", company_name).strip("- ").strip()
+
+        # optional: keep only the “brand” (first token or first two short tokens)
+        words = company_name.split()
+        if len(words) > 2:
+            company_name = words[0] if "-" in words[0] else " ".join(words[:2])
+
+        return company_name
+
+    def normalise_role(self, role: str) -> str:
+        txt = GENDER_MARKERS.sub("", role)
+        txt = PUNCTUATION.sub(" ", txt)
+        txt = MULTI_WHITESPACE.sub(" ", txt).strip()
+        return txt.lower()
 
     def _log_error(self, error, content_excerpt, suggestion=None, row_idx=None):
         """Log processing errors to a CSV file."""

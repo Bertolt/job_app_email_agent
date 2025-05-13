@@ -173,7 +173,7 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 .vscode/c_cpp_properties.json
-.vscode/launch.json
+# .vscode/launch.json
 .vscode/settings.json
 error_log.csv
 debug_df.csv
