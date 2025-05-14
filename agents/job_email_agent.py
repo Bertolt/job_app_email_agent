@@ -38,13 +38,11 @@ CROP_TAIL_AFTER_DASH = re.compile(r"\s+-\s+.*$")
 
 # any mixture of “m.b.H.”, “mbh”, “MBH” …, plus the usual suspects
 LEGAL_SUFFIXES = re.compile(
-    r"""\b(
-           gmbh        | m\s*\.?\s*b\s*\.?\s*h\s*\.? |
-           ag | se | kg | ug |
-           llc | inc | corp\.? | company | co\.? |
-           ltd | plc | oy | sas | sa | sarl | pte\.?
-       )\b""",
-    re.I | re.X,
+    r"\b(?:gmbh|"
+    r"m(?:\s|\.|){0,3}b(?:\s|\.|){0,3}h(?:\s|\.|){0,3}|"
+    r"ag|se|kg|ug|llc|inc|corp\.?|"
+    r"company|co\.|co|ltd|plc|oy|sas|sa|sarl|pte\.?)\b",
+    re.IGNORECASE,
 )
 
 GENDER_MARKERS = re.compile(r"\((?:m/w/d|w/m/d|m/f/d|d/f/m)\)", re.I)

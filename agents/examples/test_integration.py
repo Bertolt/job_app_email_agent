@@ -97,6 +97,7 @@ def run_integration_test():
                 how="left",
                 on=["date", "company_name", "job_role"],
                 indicator=True,
+                validate="one_to_one",
             )
             missing_rows = missing_rows[missing_rows["_merge"] == "left_only"].drop(
                 "_merge", axis=1
