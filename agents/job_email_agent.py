@@ -31,6 +31,7 @@ from rapidfuzz.process import cdist
 
 from agents.agent import Agent
 
+
 PUNCTUATION = re.compile(r"[^\w\s-]+", re.UNICODE)
 MULTI_WHITESPACE = re.compile(r"\s+")
 CROP_TAIL_AFTER_DASH = re.compile(r"\s+-\s+.*$")
@@ -38,7 +39,7 @@ CROP_TAIL_AFTER_DASH = re.compile(r"\s+-\s+.*$")
 # any mixture of “m.b.H.”, “mbh”, “MBH” …, plus the usual suspects
 LEGAL_SUFFIXES = re.compile(
     r"""\b(
-           gmbh        | m\s*\.?\s*b\s*\.?\s*h\s*\.? | mbh |
+           gmbh        | m\s*\.?\s*b\s*\.?\s*h\s*\.? |
            ag | se | kg | ug |
            llc | inc | corp\.? | company | co\.? |
            ltd | plc | oy | sas | sa | sarl | pte\.?
@@ -226,8 +227,8 @@ class JobApplicationEmailAgent(Agent):
                             idx,
                             e,
                         )
-                        # Log the error
-                        self._log_error(e, email_content, suggestion, idx)
+                        # Log the "email_content" for debugging
+                        self.log.debug(email_content, idx, e)
 
         except Exception as e:
             self.log.error("Error reading file: %s", e)
@@ -240,7 +241,7 @@ class JobApplicationEmailAgent(Agent):
             except ValueError:
                 # Fallback to more flexible parsing
                 parsed_date = pd.to_datetime(date_str, dayfirst=True)
-            return parsed_date.normalize().strftime("%Y-%m-%d")
+            return str(parsed_date.normalize().strftime("%Y-%m-%d"))
         else:
             return ""
 
@@ -274,22 +275,8 @@ class JobApplicationEmailAgent(Agent):
         txt = MULTI_WHITESPACE.sub(" ", txt).strip()
         return txt.lower()
 
-    def _log_error(self, error, content_excerpt, suggestion=None, row_idx=None):
-        """Log processing errors to a CSV file."""
-        data = {
-            "error": [str(error)],
-            "row_idx": [row_idx],
-            "content_excerpt": [content_excerpt],
-        }
-
-        if suggestion:
-            data["suggestion"] = [suggestion]
-
-        error_df = pd.DataFrame(data)
-        error_df.to_csv("error_log.csv", mode="a", header=False, index=False)
-
     def eliminate_duplicates(self):
-        """Second step on data analysis.
+        """Second step on data analysis. Optional step to eliminate duplicates
         when the dataframe is already created, we can eliminate duplicates
         """
         if self.reviewed_df.empty:
