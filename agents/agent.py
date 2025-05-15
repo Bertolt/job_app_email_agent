@@ -1,15 +1,51 @@
 import logging
+import os
+from datetime import datetime
 
-# Configure logger
+# Create logs directory if it doesn't exist
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# Root logger configuration
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("Agents.log"),
-        logging.StreamHandler(),  # Also output to console
-    ],
-)
+
+
+def configure_logging(agent_name=None):
+    """
+    Configure logging with daily log files.
+    Args:
+        agent_name: Optional agent name to include in the log filename
+    Returns:
+        str: Path to the configured log file
+    """
+    daily_timestamp = datetime.now().strftime("%Y%m%d")
+    # Create filename with optional agent name
+    filename_parts = []
+    if agent_name:
+        # Clean the agent name for use in filenames
+        clean_name = "".join(c if c.isalnum() else "_" for c in agent_name)
+        filename_parts.append(clean_name)
+    filename_parts.append(daily_timestamp)
+
+    log_filename = os.path.join(LOG_DIR, f"Agent_{'_'.join(filename_parts)}.log")
+
+    # Remove any existing handlers to avoid duplicate logs
+    if logger.handlers:
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+
+    # Configure the logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler(log_filename),
+            logging.StreamHandler(),  # Also output to console
+        ],
+        force=True,  # Override any existing configuration
+    )
+
+    return log_filename
 
 
 class AgentLogger:
@@ -80,7 +116,10 @@ class Agent:
         """
         Initialize the agent instance.
         """
-        # Create a logger property
+        # create the output directory where the outputs will be saved by default
+        self.output_dir = os.path.join(os.getcwd(), "outputs")
+        os.makedirs(self.output_dir, exist_ok=True)
+        self.log_file = configure_logging(self.name)
         self._logger = AgentLogger(self)
 
     @property

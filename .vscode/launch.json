@@ -17,7 +17,7 @@
             "program": "${workspaceFolder}/agents/job_email_agent.py",
             "args": [
                 "--input_file", "${workspaceFolder}/agents/data/email_data/test_sample_messages_with_crlf.csv",
-                "--output_file", "${workspaceFolder}/agents/data/email_data/test_output.csv"
+                "--output_file", "${workspaceFolder}/output/test_output.csv"
             ],
             "console": "integratedTerminal",
             "justMyCode": true
@@ -29,7 +29,7 @@
             "program": "${workspaceFolder}/agents/job_email_agent.py",
             "args": [
                 "--input_file", "${workspaceFolder}/agents/data/email_data/test_sample_duplicated_messages_with_crlf.csv",
-                "--output_file", "${workspaceFolder}/agents/data/test_duplicated_output.csv"
+                "--output_file", "${workspaceFolder}/outputs/test_duplicated_output.csv"
             ],
             "console": "integratedTerminal",
             "justMyCode": true

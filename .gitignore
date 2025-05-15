@@ -179,3 +179,5 @@ error_log.csv
 debug_df.csv
 debug_email_content.txt
 agents/data
+logs/
+outputs/

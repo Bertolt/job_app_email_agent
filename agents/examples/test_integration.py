@@ -31,14 +31,14 @@ def run_integration_test():
 
     # Ensure input files exist
     if not input_file.exists():
-        print(f"❌ Input file not found: {input_file}")
+        print(f"Input file not found: {input_file}")
         return False
 
     if not expected_output_file.exists():
-        print(f"❌ Expected output file not found: {expected_output_file}")
+        print(f"Expected output file not found: {expected_output_file}")
         return False
 
-    print(f"📝 Processing input file: {input_file}")
+    print(f"Processing input file: {input_file}")
 
     # Initialize and run agent
     agent = JobApplicationEmailAgent(
@@ -52,7 +52,7 @@ def run_integration_test():
     agent.eliminate_duplicates()
     agent.write_to_csv()
 
-    print(f"✅ Generated output file: {actual_output_file}")
+    print(f"Generated output file: {actual_output_file}")
 
     # Compare output with expected output
     try:
@@ -79,7 +79,7 @@ def run_integration_test():
 
         # Compare DataFrames
         if expected_df.equals(actual_df):
-            print("✅ Test passed! Output matches expected results.")
+            print("Test passed! Output matches expected results.")
             return True
         else:
             print("❌ Test failed! Output does not match expected results.")
@@ -97,6 +97,7 @@ def run_integration_test():
                 how="left",
                 on=["date", "company_name", "job_role"],
                 indicator=True,
+                validate="one_to_one",
             )
             missing_rows = missing_rows[missing_rows["_merge"] == "left_only"].drop(
                 "_merge", axis=1
@@ -119,7 +120,7 @@ def run_integration_test():
             return False
 
     except Exception as e:
-        print(f"❌ Error comparing files: {e}")
+        print(f"Error comparing files: {e}")
         return False
 
 
@@ -128,8 +129,8 @@ if __name__ == "__main__":
     success = run_integration_test()
 
     if success:
-        print("✅ Integration test completed successfully.")
+        print("Integration test completed successfully.")
         sys.exit(0)
     else:
-        print("❌ Integration test failed.")
+        print("Integration test failed.")
         sys.exit(1)
